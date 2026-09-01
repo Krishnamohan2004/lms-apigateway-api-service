@@ -7,11 +7,9 @@ on:
 
   workflow_dispatch:
 
-
 permissions:
   id-token: write
   contents: read
-
 
 env:
   AWS_REGION: us-east-1
@@ -20,112 +18,91 @@ env:
   K8S_NAMESPACE: lms
   APP_NAME: apigateway
 
-
 jobs:
-
-  build-test-deploy:
+  cicd:
 
     runs-on: ubuntu-latest
 
     steps:
 
-      # ==========================================
+      # ==============================
       # 1. CHECKOUT
-      # ==========================================
+      # ==============================
 
-      - name: Checkout source code
-
+      - name: Checkout Code
         uses: actions/checkout@v4
 
 
-      # ==========================================
+      # ==============================
       # 2. JAVA 17
-      # ==========================================
+      # ==============================
 
       - name: Setup Java 17
-
         uses: actions/setup-java@v4
-
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
 
 
-      # ==========================================
-      # 3. CHECK JAVA AND MAVEN
-      # ==========================================
+      # ==============================
+      # 3. MAVEN TEST
+      # ==============================
 
-      - name: Check Java and Maven
-
-        run: |
-
-          java -version
-
-          mvn -version
-
-
-      # ==========================================
-      # 4. MAVEN TEST
-      # ==========================================
-
-      - name: Run Maven tests
-
+      - name: Maven Test
         working-directory: ./apigateway
-
         run: |
-
           mvn clean test
 
 
-      # ==========================================
-      # 5. BUILD JAR
-      # ==========================================
+      # ==============================
+      # 4. MAVEN BUILD
+      # ==============================
 
-      - name: Build application
-
+      - name: Maven Build
         working-directory: ./apigateway
-
         run: |
-
           mvn clean package -DskipTests
 
 
-      # ==========================================
-      # 6. CONFIGURE AWS
-      # ==========================================
+      # ==============================
+      # 5. AWS AUTHENTICATION
+      # ==============================
 
-      - name: Configure AWS credentials
-
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
-
         with:
-
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions
 
 
-      # ==========================================
+      # ==============================
+      # 6. VERIFY AWS
+      # ==============================
+
+      - name: Verify AWS
+        run: |
+          aws sts get-caller-identity
+
+
+      # ==============================
       # 7. LOGIN TO ECR
-      # ==========================================
+      # ==============================
 
       - name: Login to Amazon ECR
-
-        id: login-ecr
-
+        id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
 
-      # ==========================================
-      # 8. CREATE IMAGE NAME
-      # ==========================================
+      # ==============================
+      # 8. SET IMAGE
+      # ==============================
 
-      - name: Set Docker image
-
+      - name: Set Docker Image
         run: |
 
-          ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
+          ECR_REGISTRY=${{ steps.ecr.outputs.registry }}
 
           IMAGE_TAG=${GITHUB_SHA}
 
@@ -133,41 +110,33 @@ jobs:
 
           echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
 
-          echo "Docker Image: ${IMAGE_URI}"
 
+      # ==============================
+      # 9. DOCKER BUILD
+      # ==============================
 
-      # ==========================================
-      # 9. BUILD DOCKER IMAGE
-      # ==========================================
-
-      - name: Build Docker image
-
+      - name: Docker Build
         working-directory: ./apigateway
-
         run: |
-
           docker build \
             -t ${{ env.IMAGE_URI }} \
             .
 
 
-      # ==========================================
+      # ==============================
       # 10. PUSH TO ECR
-      # ==========================================
+      # ==============================
 
-      - name: Push Docker image to ECR
-
+      - name: Push Docker Image
         run: |
-
           docker push ${{ env.IMAGE_URI }}
 
 
-      # ==========================================
+      # ==============================
       # 11. CONNECT TO EKS
-      # ==========================================
+      # ==============================
 
       - name: Configure EKS
-
         run: |
 
           aws eks update-kubeconfig \
@@ -175,72 +144,41 @@ jobs:
             --name ${{ env.EKS_CLUSTER_NAME }}
 
 
-      # ==========================================
+      # ==============================
       # 12. VERIFY EKS
-      # ==========================================
+      # ==============================
 
-      - name: Verify EKS connection
-
+      - name: Verify EKS
         run: |
-
           kubectl get nodes
 
 
-      # ==========================================
-      # 13. CREATE NAMESPACE
-      # ==========================================
+      # ==============================
+      # 13. DEPLOY TO KUBERNETES
+      # ==============================
 
-      - name: Deploy namespace
-
+      - name: Deploy Application
         run: |
 
           kubectl apply \
             -f ./apigateway/k8s/namespace.yaml
 
-
-      # ==========================================
-      # 14. DEPLOY CONFIGMAP
-      # ==========================================
-
-      - name: Deploy ConfigMap
-
-        run: |
-
           kubectl apply \
             -f ./apigateway/k8s/configmap.yaml
-
-
-      # ==========================================
-      # 15. DEPLOY APPLICATION
-      # ==========================================
-
-      - name: Deploy application
-
-        run: |
 
           sed "s|REPLACE_ECR_IMAGE|${{ env.IMAGE_URI }}|g" \
             ./apigateway/k8s/deployment.yaml \
             | kubectl apply -f -
 
-
-      # ==========================================
-      # 16. DEPLOY SERVICE
-      # ==========================================
-
-      - name: Deploy Service
-
-        run: |
-
           kubectl apply \
             -f ./apigateway/k8s/service.yaml
 
 
-      # ==========================================
-      # 17. WAIT FOR ROLLOUT
-      # ==========================================
+      # ==============================
+      # 14. WAIT FOR DEPLOYMENT
+      # ==============================
 
-      - name: Wait for deployment
-
+      - name: Wait for Deployment
         run: |
 
           kubectl rollout status \
@@ -249,28 +187,15 @@ jobs:
             --timeout=300s
 
 
-      # ==========================================
-      # 18. VERIFY PODS
-      # ==========================================
+      # ==============================
+      # 15. VERIFY
+      # ==============================
 
-      - name: Verify application
-
+      - name: Verify Deployment
         run: |
 
-          echo "========== PODS =========="
-
           kubectl get pods \
-            -n ${{ env.K8S_NAMESPACE }} \
-            -o wide
-
-
-          echo "========== SERVICE =========="
-
-          kubectl get svc \
             -n ${{ env.K8S_NAMESPACE }}
 
-
-          echo "========== DEPLOYMENT =========="
-
-          kubectl get deployment \
+          kubectl get svc \
             -n ${{ env.K8S_NAMESPACE }}
