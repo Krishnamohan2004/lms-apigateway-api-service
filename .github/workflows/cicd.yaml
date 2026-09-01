@@ -1,10 +1,10 @@
-
 name: CI-CD Pipeline
 
 on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
 permissions:
@@ -22,55 +22,28 @@ jobs:
   # ============================================================
   # JOB 1 - BUILD SPRING BOOT APPLICATION
   # ============================================================
+
   build:
     name: Build Spring Boot Application
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: apigateway
+
     steps:
 
       # ----------------------------------------------------------
-      # Checkout GitHub repository
+      # Checkout code
       # ----------------------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
       # ----------------------------------------------------------
-      # Find pom.xml
-      # ----------------------------------------------------------
-      - name: Find Maven Project
-        shell: bash
-        run: |
-          echo "Current directory:"
-          pwd
-
-          echo ""
-          echo "Repository files:"
-          ls -la
-
-          echo ""
-          echo "Searching for pom.xml..."
-
-          POM_FILE=$(find . -type f -name "pom.xml" -print -quit)
-
-          if [ -z "$POM_FILE" ]; then
-            echo "ERROR: pom.xml was not found."
-            exit 1
-          fi
-
-          echo "pom.xml found at:"
-          echo "$POM_FILE"
-
-          POM_DIR=$(dirname "$POM_FILE")
-
-          echo "Maven project directory:"
-          echo "$POM_DIR"
-
-          echo "POM_FILE=$POM_FILE" >> "$GITHUB_ENV"
-          echo "POM_DIR=$POM_DIR" >> "$GITHUB_ENV"
-
-      # ----------------------------------------------------------
       # Setup Java 17
       # ----------------------------------------------------------
+
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -79,79 +52,93 @@ jobs:
           cache: maven
 
       # ----------------------------------------------------------
-      # Check Java and Maven
+      # Check project
       # ----------------------------------------------------------
-      - name: Check Java and Maven
+
+      - name: Check Project
         run: |
-          java -version
-          mvn -version
+          echo "Current directory:"
+          pwd
+
+          echo "Project files:"
+          ls -la
+
+          echo "pom.xml:"
+          ls -lh pom.xml
 
       # ----------------------------------------------------------
       # Maven Validate
       # ----------------------------------------------------------
+
       - name: Maven Validate
-        working-directory: ${{ env.POM_DIR }}
         run: |
-          echo "Running Maven Validate"
-          echo "Working directory:"
-          pwd
-
-          echo "Files:"
-          ls -la
-
-          echo "Running:"
-          echo "mvn validate"
-
-          mvn validate
+          ./mvnw validate
 
       # ----------------------------------------------------------
       # Maven Compile
       # ----------------------------------------------------------
+
       - name: Maven Compile
-        working-directory: ${{ env.POM_DIR }}
         run: |
-          mvn clean compile
+          ./mvnw clean compile
 
       # ----------------------------------------------------------
       # Maven Test
       # ----------------------------------------------------------
+
       - name: Maven Test
-        working-directory: ${{ env.POM_DIR }}
         run: |
-          mvn test
+          ./mvnw test
 
       # ----------------------------------------------------------
       # Maven Package
       # ----------------------------------------------------------
+
       - name: Maven Package
-        working-directory: ${{ env.POM_DIR }}
         run: |
-          mvn clean package -DskipTests
+          ./mvnw clean package -DskipTests
 
       # ----------------------------------------------------------
-      # Check generated JAR
+      # Verify JAR
       # ----------------------------------------------------------
-      - name: Check Build Output
-        working-directory: ${{ env.POM_DIR }}
+
+      - name: Verify JAR
         run: |
-          echo "Build output:"
+          echo "=========================================="
+          echo "BUILD OUTPUT"
+          echo "=========================================="
+
           ls -lh target/
+
+          echo ""
+          echo "JAR files:"
+          find target -type f -name "*.jar" -print
+
+          JAR_COUNT=$(find target -type f -name "*.jar" | wc -l)
+
+          if [ "$JAR_COUNT" -eq 0 ]; then
+            echo "ERROR: No JAR file found"
+            exit 1
+          fi
+
+          echo ""
+          echo "JAR successfully created."
 
       # ----------------------------------------------------------
       # Upload JAR
       # ----------------------------------------------------------
+
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
           name: springboot-jar
-          path: ${{ env.POM_DIR }}/target/*.jar
+          path: apigateway/target/*.jar
 
 
   # ============================================================
   # JOB 2 - DOCKER BUILD AND PUSH TO ECR
   # ============================================================
-  # JOB 2 - DOCKER BUILD AND PUSH TO ECR
-  # ============================================================
+
   docker:
     name: Build Docker Image and Push to ECR
     runs-on: ubuntu-latest
@@ -161,113 +148,75 @@ jobs:
     steps:
 
       # ----------------------------------------------------------
-      # Checkout repository
+      # Checkout code
       # ----------------------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
       # ----------------------------------------------------------
-      # Find Maven project
-      # ----------------------------------------------------------
-      - name: Find Maven Project
-        shell: bash
-        run: |
-          echo "Searching for pom.xml..."
-
-          POM_FILE=$(find . -type f -name "pom.xml" -print -quit)
-
-          if [ -z "$POM_FILE" ]; then
-            echo "ERROR: pom.xml was not found"
-            exit 1
-          fi
-
-          POM_DIR=$(dirname "$POM_FILE")
-
-          echo "POM_FILE=$POM_FILE"
-          echo "POM_DIR=$POM_DIR"
-
-          echo "POM_FILE=$POM_FILE" >> "$GITHUB_ENV"
-          echo "POM_DIR=$POM_DIR" >> "$GITHUB_ENV"
-
-      # ----------------------------------------------------------
       # Download JAR artifact
       # ----------------------------------------------------------
+
       - name: Download JAR Artifact
         uses: actions/download-artifact@v4
         with:
           name: springboot-jar
-          path: downloaded-artifact
+          path: apigateway/target
 
       # ----------------------------------------------------------
-      # Prepare target directory
+      # Verify downloaded JAR
       # ----------------------------------------------------------
-      - name: Prepare JAR
-        shell: bash
+
+      - name: Verify JAR
         run: |
-          echo "Downloaded files:"
-          find downloaded-artifact -type f -print
+          echo "=========================================="
+          echo "DOWNLOADED JAR"
+          echo "=========================================="
 
-          mkdir -p "$POM_DIR/target"
-
-          JAR_FILE=$(find downloaded-artifact -type f -name "*.jar" -print -quit)
-
-          if [ -z "$JAR_FILE" ]; then
-            echo "ERROR: JAR file was not found"
-            exit 1
-          fi
-
-          cp "$JAR_FILE" "$POM_DIR/target/app.jar"
+          ls -lh apigateway/target/
 
           echo ""
-          echo "JAR copied to:"
-          ls -lh "$POM_DIR/target/"
+          echo "JAR files:"
+          find apigateway/target -type f -name "*.jar" -print
 
       # ----------------------------------------------------------
       # Check Dockerfile
       # ----------------------------------------------------------
+
       - name: Check Dockerfile
-        shell: bash
         run: |
-          echo "Searching for Dockerfile..."
+          echo "=========================================="
+          echo "DOCKERFILE"
+          echo "=========================================="
 
-          DOCKERFILE=$(find . -type f -name "Dockerfile" -print -quit)
-
-          if [ -z "$DOCKERFILE" ]; then
-            echo "ERROR: Dockerfile was not found"
-            exit 1
-          fi
-
-          echo "Dockerfile:"
-          echo "$DOCKERFILE"
-
-          DOCKER_DIR=$(dirname "$DOCKERFILE")
-
-          echo "DOCKER_DIR=$DOCKER_DIR" >> "$GITHUB_ENV"
+          cat apigateway/Dockerfile
 
       # ----------------------------------------------------------
-      # Check build context
+      # Check Docker build context
       # ----------------------------------------------------------
+
       - name: Check Docker Build Context
-        shell: bash
         run: |
-          echo "Maven directory:"
-          echo "$POM_DIR"
+          echo "=========================================="
+          echo "DOCKER BUILD CONTEXT"
+          echo "=========================================="
+
+          echo "Directory:"
+          pwd
 
           echo ""
-          echo "Maven directory contents:"
-          ls -la "$POM_DIR"
+          echo "apigateway directory:"
+          ls -la apigateway/
 
           echo ""
-          echo "Target directory:"
-          ls -lh "$POM_DIR/target"
-
-          echo ""
-          echo "Dockerfile:"
-          cat "$DOCKER_DIR/Dockerfile"
+          echo "target directory:"
+          ls -lh apigateway/target/
 
       # ----------------------------------------------------------
       # Configure AWS credentials
       # ----------------------------------------------------------
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -276,8 +225,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       # ----------------------------------------------------------
-      # Verify AWS credentials
+      # Check AWS identity
       # ----------------------------------------------------------
+
       - name: Check AWS Identity
         run: |
           aws sts get-caller-identity
@@ -285,8 +235,8 @@ jobs:
       # ----------------------------------------------------------
       # Get AWS Account ID
       # ----------------------------------------------------------
+
       - name: Get AWS Account ID
-        shell: bash
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity \
             --query Account \
@@ -294,11 +244,13 @@ jobs:
 
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
 
-          echo "AWS Account ID: $ACCOUNT_ID"
+          echo "AWS Account ID:"
+          echo "$ACCOUNT_ID"
 
       # ----------------------------------------------------------
       # Login to Amazon ECR
       # ----------------------------------------------------------
+
       - name: Login to Amazon ECR
         run: |
           aws ecr get-login-password \
@@ -311,6 +263,7 @@ jobs:
       # ----------------------------------------------------------
       # Verify ECR repository
       # ----------------------------------------------------------
+
       - name: Verify ECR Repository
         run: |
           aws ecr describe-repositories \
@@ -320,8 +273,8 @@ jobs:
       # ----------------------------------------------------------
       # Create image URI
       # ----------------------------------------------------------
+
       - name: Create Image URI
-        shell: bash
         run: |
           IMAGE_TAG="${GITHUB_SHA::7}"
 
@@ -333,32 +286,43 @@ jobs:
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
           echo "LATEST_IMAGE=$LATEST_IMAGE" >> "$GITHUB_ENV"
 
-          echo "IMAGE_URI=$IMAGE_URI"
-          echo "LATEST_IMAGE=$LATEST_IMAGE"
+          echo "Versioned Image:"
+          echo "$IMAGE_URI"
+
+          echo ""
+          echo "Latest Image:"
+          echo "$LATEST_IMAGE"
 
       # ----------------------------------------------------------
       # Build Docker image
       # ----------------------------------------------------------
+
       - name: Build Docker Image
-        shell: bash
         run: |
-          echo "Building Docker image..."
+          echo "=========================================="
+          echo "BUILDING DOCKER IMAGE"
+          echo "=========================================="
 
           docker build \
-            -f "$DOCKER_DIR/Dockerfile" \
+            -f apigateway/Dockerfile \
             -t "$IMAGE_URI" \
-            "$POM_DIR"
+            apigateway
 
       # ----------------------------------------------------------
       # Push versioned image
       # ----------------------------------------------------------
+
       - name: Push Docker Image
         run: |
+          echo "Pushing:"
+          echo "$IMAGE_URI"
+
           docker push "$IMAGE_URI"
 
       # ----------------------------------------------------------
       # Tag latest
       # ----------------------------------------------------------
+
       - name: Tag Latest Image
         run: |
           docker tag \
@@ -368,20 +332,27 @@ jobs:
       # ----------------------------------------------------------
       # Push latest image
       # ----------------------------------------------------------
+
       - name: Push Latest Image
         run: |
+          echo "Pushing:"
+          echo "$LATEST_IMAGE"
+
           docker push "$LATEST_IMAGE"
 
       # ----------------------------------------------------------
-      # Display image
+      # Display result
       # ----------------------------------------------------------
+
       - name: Docker Image Information
         run: |
           echo "=========================================="
           echo "DOCKER IMAGE PUSHED SUCCESSFULLY"
           echo "=========================================="
+
           echo "Versioned Image:"
           echo "$IMAGE_URI"
+
           echo ""
           echo "Latest Image:"
           echo "$LATEST_IMAGE"
