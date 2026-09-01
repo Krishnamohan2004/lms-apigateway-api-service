@@ -18,7 +18,7 @@ env:
 
   AWS_REGION: ap-south-1
 
-  ECR_REPOSITORY: lms-apigateway
+  ECR_REPOSITORY: lms-ecr
 
   EKS_CLUSTER_NAME: lms-ecr
   K8S_NAMESPACE: lms
