@@ -16,11 +16,11 @@ permissions:
 
 env:
 
-  AWS_REGION: ap-south-1
+  AWS_REGION: us-east-1
 
   ECR_REPOSITORY: lms-ecr
 
-  EKS_CLUSTER_NAME: lms-ecr
+  EKS_CLUSTER_NAME: lms-eks
   K8S_NAMESPACE: lms
 
   APP_NAME: apigateway
