@@ -488,4 +488,4 @@ jobs:
 
           kubectl get service \
             -n "$K8S_NAMESPACE"
-```
+
