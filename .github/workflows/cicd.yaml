@@ -1,7 +1,6 @@
 name: LMS API Gateway CI/CD
 
 on:
-
   push:
     branches:
       - main
@@ -15,14 +14,10 @@ permissions:
 
 
 env:
-
   AWS_REGION: us-east-1
-
   ECR_REPOSITORY: lms-ecr
-
   EKS_CLUSTER_NAME: lms-eks
   K8S_NAMESPACE: lms
-
   APP_NAME: apigateway
 
 
@@ -32,11 +27,10 @@ jobs:
 
     runs-on: ubuntu-latest
 
-
     steps:
 
       # ==========================================
-      # 1. CHECKOUT CODE
+      # 1. CHECKOUT
       # ==========================================
 
       - name: Checkout source code
@@ -45,7 +39,7 @@ jobs:
 
 
       # ==========================================
-      # 2. SETUP JAVA 17
+      # 2. JAVA 17
       # ==========================================
 
       - name: Setup Java 17
@@ -53,16 +47,26 @@ jobs:
         uses: actions/setup-java@v4
 
         with:
-
           distribution: temurin
-
           java-version: '17'
-
           cache: maven
 
 
       # ==========================================
-      # 3. MAVEN TEST
+      # 3. CHECK JAVA AND MAVEN
+      # ==========================================
+
+      - name: Check Java and Maven
+
+        run: |
+
+          java -version
+
+          mvn -version
+
+
+      # ==========================================
+      # 4. MAVEN TEST
       # ==========================================
 
       - name: Run Maven tests
@@ -71,13 +75,11 @@ jobs:
 
         run: |
 
-          chmod +x mvnw
-
-          ./mvnw clean test
+          mvn clean test
 
 
       # ==========================================
-      # 4. BUILD JAR
+      # 5. BUILD JAR
       # ==========================================
 
       - name: Build application
@@ -86,11 +88,11 @@ jobs:
 
         run: |
 
-          ./mvnw clean package -DskipTests
+          mvn clean package -DskipTests
 
 
       # ==========================================
-      # 5. CONFIGURE AWS
+      # 6. CONFIGURE AWS
       # ==========================================
 
       - name: Configure AWS credentials
@@ -105,7 +107,7 @@ jobs:
 
 
       # ==========================================
-      # 6. LOGIN TO AMAZON ECR
+      # 7. LOGIN TO ECR
       # ==========================================
 
       - name: Login to Amazon ECR
@@ -116,12 +118,10 @@ jobs:
 
 
       # ==========================================
-      # 7. SET IMAGE VARIABLES
+      # 8. CREATE IMAGE NAME
       # ==========================================
 
       - name: Set Docker image
-
-        id: image
 
         run: |
 
@@ -131,15 +131,13 @@ jobs:
 
           IMAGE_URI=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
 
-          echo "ECR_REGISTRY=${ECR_REGISTRY}" >> $GITHUB_ENV
-
-          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
-
           echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
+
+          echo "Docker Image: ${IMAGE_URI}"
 
 
       # ==========================================
-      # 8. BUILD DOCKER IMAGE
+      # 9. BUILD DOCKER IMAGE
       # ==========================================
 
       - name: Build Docker image
@@ -154,7 +152,7 @@ jobs:
 
 
       # ==========================================
-      # 9. PUSH IMAGE TO ECR
+      # 10. PUSH TO ECR
       # ==========================================
 
       - name: Push Docker image to ECR
@@ -165,10 +163,10 @@ jobs:
 
 
       # ==========================================
-      # 10. CONNECT TO EKS
+      # 11. CONNECT TO EKS
       # ==========================================
 
-      - name: Update kubeconfig
+      - name: Configure EKS
 
         run: |
 
@@ -178,10 +176,21 @@ jobs:
 
 
       # ==========================================
-      # 11. CREATE NAMESPACE
+      # 12. VERIFY EKS
       # ==========================================
 
-      - name: Create Kubernetes namespace
+      - name: Verify EKS connection
+
+        run: |
+
+          kubectl get nodes
+
+
+      # ==========================================
+      # 13. CREATE NAMESPACE
+      # ==========================================
+
+      - name: Deploy namespace
 
         run: |
 
@@ -190,10 +199,10 @@ jobs:
 
 
       # ==========================================
-      # 12. APPLY CONFIGMAP
+      # 14. DEPLOY CONFIGMAP
       # ==========================================
 
-      - name: Apply ConfigMap
+      - name: Deploy ConfigMap
 
         run: |
 
@@ -202,24 +211,10 @@ jobs:
 
 
       # ==========================================
-      # 13. UPDATE IMAGE
+      # 15. DEPLOY APPLICATION
       # ==========================================
 
-      - name: Update Kubernetes image
-
-        run: |
-
-          kubectl set image deployment/${{ env.APP_NAME }} \
-            ${{ env.APP_NAME }}=${{ env.IMAGE_URI }} \
-            -n ${{ env.K8S_NAMESPACE }} \
-            --record
-
-
-      # ==========================================
-      # 14. CREATE DEPLOYMENT IF NOT EXISTS
-      # ==========================================
-
-      - name: Apply Kubernetes deployment
+      - name: Deploy application
 
         run: |
 
@@ -229,10 +224,10 @@ jobs:
 
 
       # ==========================================
-      # 15. APPLY SERVICE
+      # 16. DEPLOY SERVICE
       # ==========================================
 
-      - name: Apply Kubernetes service
+      - name: Deploy Service
 
         run: |
 
@@ -241,10 +236,10 @@ jobs:
 
 
       # ==========================================
-      # 16. WAIT FOR DEPLOYMENT
+      # 17. WAIT FOR ROLLOUT
       # ==========================================
 
-      - name: Wait for rollout
+      - name: Wait for deployment
 
         run: |
 
@@ -255,18 +250,27 @@ jobs:
 
 
       # ==========================================
-      # 17. SHOW PODS
+      # 18. VERIFY PODS
       # ==========================================
 
-      - name: Verify deployment
+      - name: Verify application
 
         run: |
 
+          echo "========== PODS =========="
+
           kubectl get pods \
-            -n ${{ env.K8S_NAMESPACE }}
+            -n ${{ env.K8S_NAMESPACE }} \
+            -o wide
+
+
+          echo "========== SERVICE =========="
 
           kubectl get svc \
             -n ${{ env.K8S_NAMESPACE }}
+
+
+          echo "========== DEPLOYMENT =========="
 
           kubectl get deployment \
             -n ${{ env.K8S_NAMESPACE }}
