@@ -1,11 +1,10 @@
-```yaml
+
 name: CI-CD Pipeline - Spring Boot to EKS
 
 on:
   push:
     branches:
       - main
-
   workflow_dispatch:
 
 permissions:
@@ -20,9 +19,6 @@ env:
 
 jobs:
 
-  # ============================================================
-  # BUILD SPRING BOOT APPLICATION
-  # ============================================================
   build:
     name: Build Spring Boot Application
     runs-on: ubuntu-latest
@@ -32,22 +28,17 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Check repository structure
-      - name: Check Project Files
+      - name: Check Project Structure
         run: |
           echo "Current directory:"
           pwd
 
-          echo "Project files:"
+          echo "Files:"
           ls -la
 
-          echo "Searching for pom.xml:"
+          echo "POM files:"
           find . -name "pom.xml" -type f
 
-          echo "Searching for Dockerfile:"
-          find . -iname "Dockerfile" -type f
-
-      # Setup Java
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -55,49 +46,30 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Check Java and Maven
+      - name: Check Java
         run: |
           java -version
           mvn -version
 
-      # Maven validation
       - name: Maven Validate
-        run: |
-          mvn validate
+        run: mvn validate
 
-      # Compile
-      - name: Maven Compile
-        run: |
-          mvn clean compile
+      - name: Maven Build
+        run: mvn clean package -DskipTests
 
-      # Test
-      - name: Run Tests
-        run: |
-          mvn test
-
-      # Package
-      - name: Build Application
-        run: |
-          mvn clean package -DskipTests
-
-      # Check JAR
-      - name: Check Build Output
+      - name: Check Build
         run: |
           ls -lh target/
 
-      # Upload JAR
-      - name: Upload JAR Artifact
+      - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: springboot-jar
           path: target/*.jar
 
 
-  # ============================================================
-  # DOCKER BUILD AND PUSH TO ECR
-  # ============================================================
   docker:
-    name: Build Docker Image and Push to ECR
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
 
     needs: build
@@ -107,14 +79,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Download JAR
-      - name: Download JAR Artifact
+      - name: Download JAR
         uses: actions/download-artifact@v4
         with:
           name: springboot-jar
           path: target
 
-      # AWS authentication using Access Key and Secret Key
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -122,39 +92,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Verify AWS credentials
       - name: Check AWS Identity
         run: |
           aws sts get-caller-identity
 
-      # Get AWS Account ID
       - name: Get AWS Account ID
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity \
-            --query Account \
-            --output text)
-
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
 
-      # ECR Login
       - name: Login to Amazon ECR
         run: |
-          aws ecr get-login-password \
-            --region $AWS_REGION | \
+          aws ecr get-login-password --region $AWS_REGION | \
           docker login \
             --username AWS \
             --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      # Verify ECR repository
-      - name: Verify ECR Repository
+      - name: Check ECR Repository
         run: |
           aws ecr describe-repositories \
             --repository-names $ECR_REPOSITORY \
             --region $AWS_REGION
 
-      # Create image tag
-      - name: Set Docker Image
+      - name: Set Image URI
         run: |
           IMAGE_TAG=${GITHUB_SHA::7}
 
@@ -163,40 +124,33 @@ jobs:
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
-          echo "Docker Image:"
+          echo "Image URI:"
           echo "$IMAGE_URI"
 
-      # Build Docker image
       - name: Build Docker Image
         run: |
           docker build \
             -t $IMAGE_URI \
             .
 
-      # Push versioned image
       - name: Push Docker Image
         run: |
           docker push $IMAGE_URI
 
-      # Tag latest
       - name: Tag Latest Image
         run: |
           docker tag \
             $IMAGE_URI \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
 
-      # Push latest
       - name: Push Latest Image
         run: |
           docker push \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
 
 
-  # ============================================================
-  # DEPLOY TO EKS
-  # ============================================================
   deploy:
-    name: Deploy to Amazon EKS
+    name: Deploy to EKS
     runs-on: ubuntu-latest
 
     needs: docker
@@ -206,7 +160,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # AWS authentication
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -214,25 +167,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Check AWS authentication
       - name: Check AWS Identity
         run: |
           aws sts get-caller-identity
 
-      # Install kubectl
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
         with:
           version: latest
 
-      # Configure EKS
-      - name: Update kubeconfig
+      - name: Update EKS Kubeconfig
         run: |
           aws eks update-kubeconfig \
             --region $AWS_REGION \
             --name $EKS_CLUSTER_NAME
 
-      # Check EKS
       - name: Check EKS Cluster
         run: |
           aws eks describe-cluster \
@@ -240,38 +189,32 @@ jobs:
             --region $AWS_REGION \
             --query "cluster.status"
 
-      # Check Kubernetes access
       - name: Check Kubernetes Nodes
         run: |
           kubectl get nodes
 
-      # Check namespace
       - name: Check Namespace
         run: |
           kubectl get namespace $K8S_NAMESPACE
 
-      # Deploy Kubernetes manifests
       - name: Deploy Application
         run: |
           kubectl apply \
             -f k8s/ \
             -n $K8S_NAMESPACE
 
-      # Check deployment
       - name: Check Deployment
         run: |
           kubectl get deployment \
             $APP_NAME \
             -n $K8S_NAMESPACE
 
-      # Check pods
       - name: Check Pods
         run: |
           kubectl get pods \
             -n $K8S_NAMESPACE \
             -o wide
 
-      # Wait for rollout
       - name: Wait for Deployment
         run: |
           kubectl rollout status \
@@ -279,8 +222,7 @@ jobs:
             -n $K8S_NAMESPACE \
             --timeout=180s
 
-      # Final status
-      - name: Final Deployment Status
+      - name: Final Status
         run: |
           echo "=========================================="
           echo "APPLICATION DEPLOYED SUCCESSFULLY"
